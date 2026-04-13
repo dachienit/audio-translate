@@ -16,6 +16,7 @@ import soundcard as sc
 import numpy as np
 import threading
 import time
+import queue
 
 from faster_whisper import WhisperModel
 from deep_translator import GoogleTranslator
@@ -31,16 +32,18 @@ model = None
 is_recording = False
 source_lang = 'en'
 target_lang = 'vi'
+audio_queue = queue.Queue()
 
 SAMPLE_RATE = 16000
-CHUNK_SECONDS = 3  # Reduce from 6s to 3s for ~50% lower latency
+CHUNK_SECONDS = 0.5  # Capture audio in fast 0.5s chunks
 
 
 def load_model():
     """Load Whisper model at startup"""
     global model
-    print("[*] Loading Whisper model (tiny)... This may take a moment on first run.")
-    model = WhisperModel("tiny", device="cpu", compute_type="int8")
+    # Upgraded from 'tiny' to 'base' for much better accuracy, still fast enough for CPU
+    print("[*] Loading Whisper model (base)... This may take a moment on first run.")
+    model = WhisperModel("base", device="cpu", compute_type="int8")
 
     # Warm-up run to avoid cold-start latency
     dummy = np.zeros(SAMPLE_RATE, dtype=np.float32)
@@ -51,7 +54,6 @@ def load_model():
 def get_loopback_devices():
     """Get list of available loopback microphones for capturing system audio"""
     try:
-        # Get all microphones including loopback (virtual mics that capture speaker output)
         mics = sc.all_microphones(include_loopback=True)
         loopback_mics = [m for m in mics if m.isloopback]
         return [{'id': i, 'name': m.name} for i, m in enumerate(loopback_mics)]
@@ -60,62 +62,56 @@ def get_loopback_devices():
         return []
 
 
-def capture_and_transcribe(device_index=None):
-    """Main audio capture + transcription + translation loop"""
+def process_audio_worker():
+    """Background worker that continuously pulls audio from queue and transcribes"""
     global is_recording
-
-    try:
-        # Get loopback microphones (capture what speakers are playing)
-        all_loopback = [m for m in sc.all_microphones(include_loopback=True) if m.isloopback]
-
-        if not all_loopback:
-            raise Exception("Khong tim thay loopback device. Kiem tra audio driver.")
-
-        if device_index is not None and device_index < len(all_loopback):
-            loopback_mic = all_loopback[device_index]
+    
+    audio_buffer = []
+    silence_frames = 0
+    
+    while is_recording:
+        try:
+            chunk = audio_queue.get(timeout=0.5)
+        except queue.Empty:
+            continue
+            
+        # Check volume (RMS)
+        rms = np.sqrt(np.mean(chunk ** 2))
+        is_silence = rms < 0.003
+        
+        if not is_silence:
+            audio_buffer.extend(chunk)
+            silence_frames = 0
         else:
-            # Default: get loopback for the default speaker
-            default_speaker = sc.default_speaker()
-            loopback_mic = sc.get_microphone(id=str(default_speaker.id), include_loopback=True)
-
-        device_name = loopback_mic.name
-        print(f"[REC] Recording from: {device_name}")
-        socketio.emit('status', {
-            'message': f'\ud83c\udfa7 \u0110ang l\u1eafng nghe: {device_name}',
-            'recording': True
-        })
-
-        with loopback_mic.recorder(samplerate=SAMPLE_RATE, channels=1) as recorder:
-            while is_recording:
-                # Record a chunk of audio
-                audio = recorder.record(numframes=SAMPLE_RATE * CHUNK_SECONDS)
-                audio = audio.flatten().astype(np.float32)
-
-                # Skip silence / very quiet audio
-                rms = np.sqrt(np.mean(audio ** 2))
-                if rms < 0.003:
-                    continue
-
-                # Transcribe with Whisper
-                try:
-                    segments, info = model.transcribe(
-                        audio,
-                        language=source_lang if source_lang != 'auto' else None,
-                        beam_size=1,  # Reduced from 5 to 1 for faster inference
-                        vad_filter=True,
-                        vad_parameters=dict(
-                            min_silence_duration_ms=200,  # Lower threshold to trigger transcription earlier
-                        ),
-                    )
-                    text = " ".join([seg.text for seg in segments]).strip()
-                except Exception as e:
-                    print(f"Transcription error: {e}")
-                    continue
-
-                # Skip empty or noise-only results
+            if len(audio_buffer) > 0:
+                silence_frames += 1
+                audio_buffer.extend(chunk)
+                
+        buffer_duration = len(audio_buffer) / SAMPLE_RATE
+        
+        # Transcribe if we hit a pause in speech (pushed by silence) OR buffer is getting long (7+ seconds)
+        if (buffer_duration >= 1.5 and silence_frames >= 2) or buffer_duration >= 6.0:
+            audio_data = np.array(audio_buffer, dtype=np.float32)
+            
+            # Reset buffers instantly to allow next sentences to queue up
+            audio_buffer = []
+            silence_frames = 0
+            
+            try:
+                # Transcribe
+                segments, info = model.transcribe(
+                    audio_data,
+                    language=source_lang if source_lang != 'auto' else None,
+                    beam_size=2,  # Balanced for speed and accuracy
+                    vad_filter=True,
+                    vad_parameters=dict(min_silence_duration_ms=200),
+                )
+                text = " ".join([seg.text for seg in segments]).strip()
+                
                 if not text:
                     continue
-                # Skip common Whisper hallucinations
+                    
+                # Filter hallucinations
                 hallucinations = [
                     '', '.', '...', 'you', 'thank you.', 'thanks.',
                     'bye.', 'thank you for watching.', 'thanks for watching.',
@@ -123,7 +119,7 @@ def capture_and_transcribe(device_index=None):
                 ]
                 if text.lower().strip('.').strip() in hallucinations:
                     continue
-
+                
                 # Translate
                 translated = text
                 if source_lang != target_lang:
@@ -148,6 +144,42 @@ def capture_and_transcribe(device_index=None):
                     'translated': translated,
                     'timestamp': timestamp,
                 })
+            except Exception as e:
+                print(f"Transcription error: {e}")
+
+
+def capture_audio(device_index=None):
+    """Focuses ONLY on capturing microphone loopback data smoothly"""
+    global is_recording
+
+    try:
+        all_loopback = [m for m in sc.all_microphones(include_loopback=True) if m.isloopback]
+        if not all_loopback:
+            raise Exception("Khong tim thay loopback device. Kiem tra audio driver.")
+
+        if device_index is not None and device_index < len(all_loopback):
+            loopback_mic = all_loopback[device_index]
+        else:
+            default_speaker = sc.default_speaker()
+            loopback_mic = sc.get_microphone(id=str(default_speaker.id), include_loopback=True)
+
+        device_name = loopback_mic.name
+        print(f"[REC] Recording from: {device_name}")
+        socketio.emit('status', {
+            'message': f'\ud83c\udfa7 \u0110ang l\u1eafng nghe: {device_name}',
+            'recording': True
+        })
+
+        # Process thread
+        process_thread = threading.Thread(target=process_audio_worker, daemon=True)
+        process_thread.start()
+
+        # Capture loop - blocks but is very tight
+        with loopback_mic.recorder(samplerate=SAMPLE_RATE, channels=1) as recorder:
+            while is_recording:
+                audio = recorder.record(numframes=int(SAMPLE_RATE * CHUNK_SECONDS))
+                audio = audio.flatten().astype(np.float32)
+                audio_queue.put(audio)
 
     except Exception as e:
         error_msg = str(e)
@@ -163,12 +195,9 @@ def capture_and_transcribe(device_index=None):
 def index():
     return app.send_static_file('index.html')
 
-
 @app.route('/api/devices')
 def api_devices():
-    """Return available audio output devices for loopback capture"""
-    devices = get_loopback_devices()
-    return jsonify(devices)
+    return jsonify(get_loopback_devices())
 
 
 # ===== Socket.IO Events =====
@@ -180,7 +209,6 @@ def handle_connect():
         'recording': False
     })
 
-
 @socketio.on('start')
 def handle_start(data=None):
     global is_recording, source_lang, target_lang
@@ -189,7 +217,10 @@ def handle_start(data=None):
         socketio.emit('status', {'message': '\u0110ang ghi r\u1ed3i.', 'recording': True})
         return
 
-    # Parse settings from client
+    # Clear queue
+    while not audio_queue.empty():
+        audio_queue.get_nowait()
+
     device_index = None
     if data:
         source_lang = data.get('sourceLang', 'en')
@@ -202,20 +233,14 @@ def handle_start(data=None):
                 device_index = None
 
     is_recording = True
-    thread = threading.Thread(
-        target=capture_and_transcribe,
-        args=(device_index,),
-        daemon=True
-    )
+    thread = threading.Thread(target=capture_audio, args=(device_index,), daemon=True)
     thread.start()
-
 
 @socketio.on('stop')
 def handle_stop():
     global is_recording
     is_recording = False
     print("[STOP] Recording stopped by client")
-
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -224,10 +249,9 @@ def handle_disconnect():
     print("[-] Client disconnected")
 
 
-# ===== Main =====
 if __name__ == '__main__':
     print("=" * 50)
-    print("  Meeting Translator")
+    print("  Meeting Translator (Multi-threaded & High Accuracy)")
     print("=" * 50)
 
     load_model()
