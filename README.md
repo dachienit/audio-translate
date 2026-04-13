@@ -20,11 +20,13 @@ git clone https://github.com/dachienit/audio-translate.git
 cd audio-translate
 ```
 
-**Bước 2: Chạy ứng dụng bằng 1 click**
-Tại thư mục project `audio-translate`, bạn chỉ cần:
-- Double-click vào file **`start.bat`**.
+**Lựa chọn 1: Máy tính cá nhân bình thường**
+Double-click vào file **`start.bat`**.
 
-Script này sẽ tự động:
+**Lựa chọn 2: Máy công ty bị khóa Admin & cấm Add PATH**
+Double-click vào file **`run_portable.bat`**. (Đợi vài phút để nó tự tải bản Python di động về thư mục cục bộ).
+
+Cả hai script đều tự động thực hiện:
 1. Kiểm tra Python đã được cài đặt chưa.
 2. Tự động tải và cài đặt toàn bộ thư viện bắt buộc (từ `requirements.txt`).
 3. Khởi động backend Server (Python).
