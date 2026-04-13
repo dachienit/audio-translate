@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.env
+
+# MacOS
+.DS_Store
+
+# Whisper Model Cache (HuggingFace)
+.cache/

@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Real-time Meeting Translator - Dịch cuộc họp trực tiếp">
+    <title>Meeting Translator — Dịch cuộc họp thời gian thực</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Animated background -->
+        <div class="bg-orbs">
+            <div class="orb orb-1"></div>
+            <div class="orb orb-2"></div>
+            <div class="orb orb-3"></div>
+        </div>
+
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo">
+                <svg class="logo-icon" viewBox="0 0 40 40" fill="none">
+                    <circle cx="20" cy="20" r="18" stroke="url(#logoGrad)" stroke-width="2.5"/>
+                    <path d="M14 16h12M14 20h12M14 24h8" stroke="url(#logoGrad)" stroke-width="2" stroke-linecap="round"/>
+                    <defs>
+                        <linearGradient id="logoGrad" x1="0" y1="0" x2="40" y2="40">
+                            <stop offset="0%" stop-color="#6366f1"/>
+                            <stop offset="100%" stop-color="#a855f7"/>
+                        </linearGradient>
+                    </defs>
+                </svg>
+                <h1>Meeting Translator</h1>
+            </div>
+            <p class="subtitle">Dịch cuộc họp MS Teams / Zoom / Google Meet theo thời gian thực</p>
+        </header>
+
+        <!-- Connection Status -->
+        <div class="connection-status" id="connection-status">
+            <span class="conn-dot disconnected" id="conn-dot"></span>
+            <span id="conn-text">Đang kết nối...</span>
+        </div>
+
+        <!-- Settings -->
+        <section class="settings-section">
+            <!-- Audio Device -->
+            <div class="setting-row">
+                <label class="setting-label">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="setting-icon">
+                        <path d="M3 18v-6a9 9 0 0 1 18 0v6"/>
+                        <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/>
+                    </svg>
+                    Thiết bị âm thanh:
+                </label>
+                <div class="select-wrapper">
+                    <select id="device-select">
+                        <option value="">Mặc định (Default Speaker)</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Language Row -->
+            <div class="setting-row lang-row">
+                <div class="lang-group">
+                    <label class="setting-label-sm">Ngôn ngữ nguồn:</label>
+                    <div class="select-wrapper">
+                        <select id="source-lang">
+                            <option value="en">🇬🇧 English</option>
+                            <option value="auto">🌐 Tự động</option>
+                            <option value="ja">🇯🇵 日本語</option>
+                            <option value="ko">🇰🇷 한국어</option>
+                            <option value="zh">🇨🇳 中文</option>
+                            <option value="fr">🇫🇷 Français</option>
+                            <option value="de">🇩🇪 Deutsch</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="lang-arrow">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="5" y1="12" x2="19" y2="12"/>
+                        <polyline points="12 5 19 12 12 19"/>
+                    </svg>
+                </div>
+
+                <div class="lang-group">
+                    <label class="setting-label-sm">Dịch sang:</label>
+                    <div class="select-wrapper">
+                        <select id="target-lang">
+                            <option value="vi">🇻🇳 Tiếng Việt</option>
+                            <option value="en">🇬🇧 English</option>
+                            <option value="ja">🇯🇵 日本語</option>
+                            <option value="ko">🇰🇷 한국어</option>
+                            <option value="zh-CN">🇨🇳 中文</option>
+                            <option value="fr">🇫🇷 Français</option>
+                            <option value="de">🇩🇪 Deutsch</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Controls -->
+        <section class="controls-section">
+            <button id="btn-start" class="btn-primary">
+                <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+                <span>Bắt đầu lắng nghe</span>
+            </button>
+            <button id="btn-stop" class="btn-secondary" disabled>
+                <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <rect x="6" y="4" width="4" height="16"/>
+                    <rect x="14" y="4" width="4" height="16"/>
+                </svg>
+                <span>Dừng lại</span>
+            </button>
+        </section>
+
+        <!-- Status -->
+        <div class="status-bar" id="status-bar" style="display:none;">
+            <span class="pulse-dot"></span>
+            <span id="status-text">Đang lắng nghe...</span>
+        </div>
+
+        <!-- Transcript Panels -->
+        <section class="transcript-section">
+            <div class="panels">
+                <!-- Original Panel -->
+                <div class="panel">
+                    <div class="panel-header">
+                        <h2>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="panel-icon">
+                                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                            </svg>
+                            Original
+                        </h2>
+                        <button class="btn-action" id="btn-copy-original" title="Sao chép">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="panel-body" id="panel-original">
+                        <p class="placeholder-text">Transcript sẽ xuất hiện ở đây...</p>
+                    </div>
+                </div>
+
+                <!-- Translation Panel -->
+                <div class="panel panel-translated">
+                    <div class="panel-header">
+                        <h2>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="panel-icon">
+                                <path d="M5 8l6 10"/>
+                                <path d="M4 14h6"/>
+                                <circle cx="17" cy="8" r="5"/>
+                                <path d="M17 6v4M15 8h4"/>
+                            </svg>
+                            Bản dịch
+                        </h2>
+                        <button class="btn-action" id="btn-copy-translated" title="Sao chép">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="panel-body" id="panel-translated">
+                        <p class="placeholder-text">Bản dịch sẽ xuất hiện ở đây...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="bottom-actions">
+                <button id="btn-clear" class="btn-action-text">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="3 6 5 6 21 6"/>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    </svg>
+                    Xóa tất cả
+                </button>
+                <button id="btn-download" class="btn-action-text">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    Tải file
+                </button>
+                <div class="stats">
+                    <span id="entry-count">0 câu</span>
+                    <span class="stats-sep">•</span>
+                    <span id="duration">0:00</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Toast -->
+        <div class="toast" id="toast">
+            <span id="toast-msg"></span>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
